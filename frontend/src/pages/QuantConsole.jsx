@@ -43,7 +43,7 @@ const QuantConsole = () => {
   const [signalsLoading, setSignalsLoading] = useState(true);
 
   // Backtester Sandbox States
-  const [symbol, setSymbol] = useState('RELIANCE.NS');
+  const [symbol, setSymbol] = useState('');
   const [strategy, setStrategy] = useState('sma');
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
@@ -66,7 +66,7 @@ const QuantConsole = () => {
   const [backtestError, setBacktestError] = useState('');
 
   // Stock Comparison States
-  const [compareSymbols, setCompareSymbols] = useState('RELIANCE.NS, INFY.NS');
+  const [compareSymbols, setCompareSymbols] = useState('');
   const [compareMode, setCompareMode] = useState('sip');
   const [compareFrequency, setCompareFrequency] = useState('monthly');
   const [compareAmount, setCompareAmount] = useState('5000');
@@ -127,7 +127,7 @@ const QuantConsole = () => {
     if (activeTab === 'risk') loadRiskReport();
     if (activeTab === 'signals') loadTechnicalSignals();
     if (activeTab === 'backtest') loadBacktestHistory();
-    if (activeTab === 'compare' && !compareResult) {
+    if (activeTab === 'compare' && !compareResult && compareSymbols.trim()) {
       runComparisonAPI(compareSymbols);
     }
   }, [activeTab]);
@@ -308,6 +308,10 @@ const QuantConsole = () => {
           
           {riskLoading ? (
             <div style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)' }}>Analyzing portfolio volatility models...</div>
+          ) : !riskData || ((!riskData.volatility || riskData.volatility === 0) && (!riskData.sharpe || riskData.sharpe === 0) && (!riskData.sectors || riskData.sectors.length === 0)) ? (
+            <div className="glass-panel" style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)' }}>
+              No active asset positions found in your portfolio. Record assets in the Holdings tab to calculate annualized volatility, Sharpe ratio, and sector allocations.
+            </div>
           ) : (
             <>
               {/* KPIs Row */}
@@ -591,7 +595,7 @@ const QuantConsole = () => {
                           <td>
                             <span className="badge badge-neutral" style={{ fontSize: '0.65rem' }}>{item.strategy_name}</span>
                           </td>
-                          <td style={{ fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{res.symbol || 'TCS.NS'}</td>
+                          <td style={{ fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{res?.symbol || item.strategy_name || '-'}</td>
                           <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{item.start_date.split('T')[0]}</td>
                           <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{item.end_date.split('T')[0]}</td>
                           <td style={{ textAlign: 'right', fontWeight: 600, color: res.strategy_return >= 0 ? '#34d399' : '#f87171', fontFamily: 'var(--font-mono)' }}>
@@ -837,6 +841,13 @@ const QuantConsole = () => {
             <div className="glass-panel" style={{ padding: '80px', display: 'flex', flexDirection: 'column', gap: '16px', justifyContent: 'center', alignItems: 'center', color: 'var(--text-muted)' }}>
               <div style={{ border: '3px solid rgba(59, 130, 246, 0.1)', borderTop: '3px solid var(--primary)', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite' }} />
               <div>Running heavy Monte Carlo simulations & compiling historical performance logs...</div>
+            </div>
+          )}
+
+          {/* Empty state when no comparison has been run */}
+          {!compareResult && !comparing && !compareError && (
+            <div className="glass-panel" style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)' }}>
+              Enter ticker symbols above or choose a preset to compare historical return distributions and SIP projections.
             </div>
           )}
 

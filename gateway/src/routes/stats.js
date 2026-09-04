@@ -111,33 +111,37 @@ router.get('/overview', async (req, res) => {
     `);
     
     const dailyNetWorthTrend = [];
-    let rollingCash = cashBalance;
+    
+    // Only compile historical trend if there is active wealth or past transactions
+    if (cashBalance > 0 || holdingsValuation > 0 || allTxResult.rows.length > 0) {
+      let rollingCash = cashBalance;
 
-    // Create 30 days keys in reverse order (today backwards)
-    for (let i = 0; i <= 30; i++) {
-      const dateObj = new Date();
-      dateObj.setDate(dateObj.getDate() - i);
-      const dateStr = dateObj.toISOString().split('T')[0];
+      // Create 30 days keys in reverse order (today backwards)
+      for (let i = 0; i <= 30; i++) {
+        const dateObj = new Date();
+        dateObj.setDate(dateObj.getDate() - i);
+        const dateStr = dateObj.toISOString().split('T')[0];
 
-      // Add cash net worth + holdings live value
-      dailyNetWorthTrend.unshift({
-        date: dateStr,
-        netWorth: parseFloat((rollingCash + holdingsValuation).toFixed(2)),
-        cash: parseFloat(rollingCash.toFixed(2)),
-        assets: parseFloat(holdingsValuation.toFixed(2))
-      });
+        // Add cash net worth + holdings live value
+        dailyNetWorthTrend.unshift({
+          date: dateStr,
+          netWorth: parseFloat((rollingCash + holdingsValuation).toFixed(2)),
+          cash: parseFloat(rollingCash.toFixed(2)),
+          assets: parseFloat(holdingsValuation.toFixed(2))
+        });
 
-      // Roll back cash: subtract credits, add debits that happened on this day
-      const daysTxs = allTxResult.rows.filter(tx => {
-        const txDateStr = new Date(tx.date).toISOString().split('T')[0];
-        return txDateStr === dateStr;
-      });
+        // Roll back cash: subtract credits, add debits that happened on this day
+        const daysTxs = allTxResult.rows.filter(tx => {
+          const txDateStr = new Date(tx.date).toISOString().split('T')[0];
+          return txDateStr === dateStr;
+        });
 
-      for (const tx of daysTxs) {
-        if (tx.type === 'credit') {
-          rollingCash -= parseFloat(tx.amount);
-        } else if (tx.type === 'debit') {
-          rollingCash += parseFloat(tx.amount);
+        for (const tx of daysTxs) {
+          if (tx.type === 'credit') {
+            rollingCash -= parseFloat(tx.amount);
+          } else if (tx.type === 'debit') {
+            rollingCash += parseFloat(tx.amount);
+          }
         }
       }
     }

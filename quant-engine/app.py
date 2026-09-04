@@ -322,16 +322,10 @@ def parse_document():
                     "raw_text": line
                 })
         
-        # If no entries parsed, return high-quality mock array from dummy statement
+        # If no entries parsed, return empty array
         if not transactions:
-            print("No transactions parsed from text. Injecting standard mock review statement...")
-            transactions = [
-                {"date": "2026-07-05", "amount": 1450.00, "type": "debit", "category": "Food", "description": "Swiggy Delivery Cafe Delhi", "raw_text": "05/07/2026 SWIGGY DELHI - 1,450.00"},
-                {"date": "2026-07-08", "amount": 4200.00, "type": "debit", "category": "Utilities", "description": "BSNL Broadband Internet Bill", "raw_text": "08/07/2026 BSNL BILL PAYMENT - 4,200.00"},
-                {"date": "2026-07-10", "amount": 80000.00, "type": "credit", "category": "Salary", "description": "Salary Credited", "raw_text": "10/07/2026 SALARY CREDIT CORP - 80,000.00"},
-                {"date": "2026-07-12", "amount": 1500.00, "type": "debit", "category": "Shopping", "description": "Amazon Retail Store India", "raw_text": "12/07/2026 AMAZON RETAIL - 1,500.00"},
-                {"date": "2026-07-14", "amount": 12000.00, "type": "debit", "category": "Investment", "description": "SIP Mutual Fund Allocation", "raw_text": "14/07/2026 HDFC MUTUAL FUND - 12,000.00"}
-            ]
+            print("No transactions parsed from document text.")
+            return jsonify({"transactions": [], "message": "No transactions could be extracted from this document."})
             
         return jsonify({"transactions": transactions})
     except Exception as e:
@@ -392,33 +386,17 @@ def get_market_quote():
         if asset_type in ['mutual_fund', 'mf']:
             mf_data = parse_amfi_nav(symbol)
             if not mf_data:
-                print(f"AMFI NAV feed is offline or code '{symbol}' not found. Using offline mutual fund fallback...")
-                hash_val = sum(ord(c) for c in symbol)
-                
-                # Mock Database for common Indian Mutual Funds
-                mock_mfs = {
-                    "127042": {"name": "Motilal Oswal Midcap Fund - Direct Growth", "price": 105.42, "date": "2026-07-17"},
-                    "127039": {"name": "Motilal Oswal Midcap Fund - Regular Growth", "price": 98.76, "date": "2026-07-17"},
-                    "120716": {"name": "Axis Bluechip Fund - Direct Growth", "price": 54.30, "date": "2026-07-17"},
-                    "118223": {"name": "Mirae Asset Large Cap Fund - Direct Growth", "price": 115.80, "date": "2026-07-17"}
-                }
-                
                 sym_str = symbol.strip()
-                if sym_str in mock_mfs:
-                    entry = mock_mfs[sym_str]
-                    mf_data = {
-                        "symbol": sym_str,
-                        "name": entry["name"],
-                        "price": entry["price"],
-                        "date": entry["date"]
-                    }
-                else:
-                    mf_data = {
-                        "symbol": sym_str,
-                        "name": f"Mutual Fund Scheme {sym_str}",
-                        "price": 10.0 + (hash_val % 150),
-                        "date": time.strftime("%Y-%m-%d")
-                    }
+                return jsonify({
+                    "symbol": sym_str,
+                    "price": 0.0,
+                    "name": f"Mutual Fund Scheme {sym_str}",
+                    "currency": "INR",
+                    "pe": None,
+                    "pb": None,
+                    "dividend_yield": None,
+                    "updated_at": time.strftime("%Y-%m-%d")
+                })
             
             return jsonify({
                 "symbol": mf_data["symbol"],
@@ -433,6 +411,11 @@ def get_market_quote():
         else:
             ticker = yf.Ticker(symbol)
             price = 0.0
+            currency = "INR" if symbol.endswith(".NS") or symbol.endswith(".BO") else "USD"
+            name = symbol
+            pe = None
+            pb = None
+            div_yield = None
             
             # Try fetching live price via yfinance history or fast_info
             try:
@@ -442,50 +425,9 @@ def get_market_quote():
                 else:
                     price = float(ticker.fast_info.get('lastPrice', 0.0))
             except Exception as e:
-                print(f"yfinance lookup error for {symbol} (will try offline fallback): {e}")
+                print(f"yfinance lookup error for {symbol}: {e}")
 
-            # If yfinance is offline, blocked, or symbol not found, use mock database fallback
-            if price == 0.0:
-                print(f"yfinance returned 0.0 or is offline for '{symbol}'. Using offline fallback quote system...")
-                hash_val = sum(ord(c) for c in symbol)
-                
-                # Mock Database for common demo symbols
-                mock_db = {
-                    "TSLA": {"price": 250.50, "name": "Tesla, Inc.", "pe": 75.4, "pb": 8.2, "div": 0.0, "currency": "USD"},
-                    "AAPL": {"price": 180.20, "name": "Apple Inc.", "pe": 30.2, "pb": 45.3, "div": 0.5, "currency": "USD"},
-                    "MSFT": {"price": 420.50, "name": "Microsoft Corporation", "pe": 35.6, "pb": 12.1, "div": 0.7, "currency": "USD"},
-                    "AMZN": {"price": 175.40, "name": "Amazon.com, Inc.", "pe": 62.1, "pb": 9.4, "div": 0.0, "currency": "USD"},
-                    "GOOGL": {"price": 170.80, "name": "Alphabet Inc.", "pe": 25.3, "pb": 7.1, "div": 0.0, "currency": "USD"},
-                    "HDFCBANK.NS": {"price": 1650.00, "name": "HDFC Bank Limited", "pe": 19.2, "pb": 2.8, "div": 1.1, "currency": "INR"},
-                    "TCS.NS": {"price": 3850.00, "name": "Tata Consultancy Services Limited", "pe": 28.4, "pb": 11.5, "div": 2.4, "currency": "INR"},
-                    "INFY.NS": {"price": 1520.00, "name": "Infosys Limited", "pe": 24.1, "pb": 7.3, "div": 2.8, "currency": "INR"},
-                    "RELIANCE.NS": {"price": 2450.00, "name": "Reliance Industries Limited", "pe": 26.5, "pb": 2.1, "div": 0.4, "currency": "INR"},
-                }
-                
-                sym_upper = symbol.upper().strip()
-                if sym_upper in mock_db:
-                    data = mock_db[sym_upper]
-                    price = data["price"]
-                    pe = data["pe"]
-                    pb = data["pb"]
-                    div_yield = data["div"]
-                    name = data["name"]
-                    currency = data["currency"]
-                else:
-                    # Generate deterministic mock numbers so same symbol behaves consistently
-                    currency = "INR" if sym_upper.endswith(".NS") or sym_upper.endswith(".BO") else "USD"
-                    price = 50.0 + (hash_val % 200) * 10
-                    pe = 10.0 + (hash_val % 40)
-                    pb = 1.0 + ((hash_val % 90) / 10.0)
-                    div_yield = (hash_val % 40) / 10.0
-                    name = f"{sym_upper} Equity"
-            else:
-                pe = None
-                pb = None
-                div_yield = None
-                name = symbol
-                currency = "INR" if symbol.endswith(".NS") or symbol.endswith(".BO") else "USD"
-
+            if price > 0.0:
                 try:
                     info = ticker.info
                     pe = info.get('trailingPE') or info.get('forwardPE')
@@ -497,30 +439,6 @@ def get_market_quote():
                     currency = info.get('currency') or currency
                 except Exception as e:
                     print(f"Non-fatal error loading ticker.info: {e}")
-
-                # Robust fallback for missing fundamental metrics (common with yfinance API limits)
-                hash_val = sum(ord(c) for c in symbol)
-                sym_upper = symbol.upper().strip()
-                mock_db = {
-                    "TSLA": {"price": 250.50, "name": "Tesla, Inc.", "pe": 75.4, "pb": 8.2, "div": 0.0, "currency": "USD"},
-                    "AAPL": {"price": 180.20, "name": "Apple Inc.", "pe": 30.2, "pb": 45.3, "div": 0.5, "currency": "USD"},
-                    "MSFT": {"price": 420.50, "name": "Microsoft Corporation", "pe": 35.6, "pb": 12.1, "div": 0.7, "currency": "USD"},
-                    "AMZN": {"price": 175.40, "name": "Amazon.com, Inc.", "pe": 62.1, "pb": 9.4, "div": 0.0, "currency": "USD"},
-                    "GOOGL": {"price": 170.80, "name": "Alphabet Inc.", "pe": 25.3, "pb": 7.1, "div": 0.0, "currency": "USD"},
-                    "HDFCBANK.NS": {"price": 1650.00, "name": "HDFC Bank Limited", "pe": 19.2, "pb": 2.8, "div": 1.1, "currency": "INR"},
-                    "TCS.NS": {"price": 3850.00, "name": "Tata Consultancy Services Limited", "pe": 28.4, "pb": 11.5, "div": 2.4, "currency": "INR"},
-                    "INFY.NS": {"price": 1520.00, "name": "Infosys Limited", "pe": 24.1, "pb": 7.3, "div": 2.8, "currency": "INR"},
-                    "RELIANCE.NS": {"price": 2450.00, "name": "Reliance Industries Limited", "pe": 26.5, "pb": 2.1, "div": 0.4, "currency": "INR"},
-                }
-                if sym_upper in mock_db:
-                    db_data = mock_db[sym_upper]
-                    if pe is None: pe = db_data["pe"]
-                    if pb is None: pb = db_data["pb"]
-                    if div_yield is None: div_yield = db_data["div"]
-                else:
-                    if pe is None: pe = 10.0 + (hash_val % 40)
-                    if pb is None: pb = 1.0 + ((hash_val % 90) / 10.0)
-                    if div_yield is None: div_yield = (hash_val % 40) / 10.0
 
             return jsonify({
                 "symbol": symbol,
@@ -686,6 +604,13 @@ def get_portfolio_insights():
         cash_balance = float(context.get('cashBalance', 0))
         monthly_credit = float(context.get('monthlyCredit', 0))
         monthly_debit = float(context.get('monthlyDebit', 0))
+        budgets = context.get('budgets', [])
+        holdings = context.get('holdings', [])
+        category_spend = context.get('categorySpend', [])
+
+        # If completely fresh account with no activity, return empty list so UI displays clean empty state
+        if cash_balance == 0 and monthly_credit == 0 and monthly_debit == 0 and not budgets and not holdings:
+            return jsonify({"insights": []})
         
         savings_rate = 0.0
         if monthly_credit > 0:
@@ -693,71 +618,75 @@ def get_portfolio_insights():
             
         insights = []
         
-        # Insight 1: Savings velocity
-        if savings_rate > 30:
+        # Insight 1: Savings velocity (only when income exists)
+        if monthly_credit > 0:
+            if savings_rate > 30:
+                insights.append({
+                    "title": "Excellent Savings Velocity",
+                    "content": f"Your savings rate is strong at {savings_rate:.1f}%. You are successfully keeping a large portion of your income. Consider routing excess cash from your savings into index funds or diversified mutual funds via automated SIPs.",
+                    "type": "success"
+                })
+            elif savings_rate > 0:
+                insights.append({
+                    "title": "Moderate Capital Retention",
+                    "content": f"Your savings rate is {savings_rate:.1f}%. While positive, you can accelerate wealth compounding by trimming discretionary expenses to reach a 30%+ target.",
+                    "type": "info"
+                })
+            else:
+                insights.append({
+                    "title": "Capital Outflow Alert",
+                    "content": f"Your savings rate is negative ({savings_rate:.1f}%). Monthly debit outflows of ₹{monthly_debit:,.2f} exceed credits. Review your ledger items to stop wealth leakage.",
+                    "type": "warning"
+                })
+        elif monthly_debit > 0:
             insights.append({
-                "title": "Excellent Savings Velocity",
-                "content": f"Your savings rate is strong at {savings_rate:.1f}%. You are successfully keeping a large portion of your income. Consider routing excess cash from HDFC Savings into your Demat index funds via automated SIPs.",
-                "type": "success"
-            })
-        elif savings_rate > 0:
-            insights.append({
-                "title": "Moderate Capital Retention",
-                "content": f"Your savings rate is {savings_rate:.1f}%. While positive, you can accelerate wealth compounding by trimming discretionary budgets like Shopping and Entertainment to reach a 30%+ target.",
+                "title": "Expense Tracking Active",
+                "content": f"Current monthly outflows are ₹{monthly_debit:,.2f}. Log your income credits to track your monthly net savings rate.",
                 "type": "info"
             })
-        else:
-            insights.append({
-                "title": "Capital Outflow Alert",
-                "content": f"Your savings rate is negative ({savings_rate:.1f}%). Monthly debit outflows of ₹{monthly_debit:,.2f} exceed credits. Review your ledger items to stop wealth leakage.",
-                "type": "warning"
-            })
 
-        # Insight 2: Liquidity Buffer
+        # Insight 2: Liquidity Buffer (only when cash or debit is non-zero)
         if monthly_debit > 0 and cash_balance > monthly_debit * 3:
             insights.append({
                 "title": "Liquidity Inflation Drag",
-                "content": f"Cash reserves of ₹{cash_balance:,.2f} exceed 3 months of typical expenses. This idle capital is suffering from inflation drag. Allocate a portion into low-volatility ETFs or short-term liquid mutual funds.",
+                "content": f"Cash reserves of ₹{cash_balance:,.2f} exceed 3 months of typical expenses. This idle capital may experience inflation drag. Consider allocating a portion into low-volatility funds.",
                 "type": "info"
             })
         elif monthly_debit > 0 and cash_balance < monthly_debit * 1:
             insights.append({
                 "title": "Low Liquidity Buffer",
-                "content": f"Your cash reserves of ₹{cash_balance:,.2f} are thin. Maintain at least 3 months of emergency expenses before building larger stock/equity weightings.",
+                "content": f"Your cash reserves of ₹{cash_balance:,.2f} are below 1 month of current expenses. Maintain at least 3 months of emergency buffer before expanding equity positions.",
                 "type": "warning"
             })
-        else:
+        elif cash_balance > 0:
             insights.append({
                 "title": "Healthy Liquidity Reserves",
-                "content": f"Your cash reserves of ₹{cash_balance:,.2f} provide a solid financial cushion. Your risk tolerance allows for steady equity compounding.",
+                "content": f"Your cash reserves of ₹{cash_balance:,.2f} provide a solid financial cushion.",
                 "type": "success"
             })
 
-        # Insight 3: Budget tracking
-        budgets = context.get('budgets', [])
-        category_spend = context.get('categorySpend', [])
-        over_budget_cats = []
-        for cat_spend in category_spend:
-            cat_name = cat_spend.get('category')
-            total_spend = cat_spend.get('total', 0)
-            
-            # Find budget limit
-            limit = next((float(b.get('monthly_limit')) for b in budgets if b.get('category') == cat_name), None)
-            if limit and total_spend > limit:
-                over_budget_cats.append(cat_name)
-                
-        if over_budget_cats:
-            insights.append({
-                "title": f"Budget Breached: {', '.join(over_budget_cats)}",
-                "content": f"Active transactions have breached monthly allocations for {', '.join(over_budget_cats)}. Review your recent ledger purchases to restrict further outflows.",
-                "type": "warning"
-            })
-        else:
-            insights.append({
-                "title": "Ledger Budgets Intact",
-                "content": "All category expenses are currently operating within the monthly limits you defined. Excellent budget discipline.",
-                "type": "success"
-            })
+        # Insight 3: Budget tracking (only when budgets are defined)
+        if budgets:
+            over_budget_cats = []
+            for cat_spend in category_spend:
+                cat_name = cat_spend.get('category')
+                total_spend = cat_spend.get('total', 0)
+                limit = next((float(b.get('monthly_limit')) for b in budgets if b.get('category') == cat_name), None)
+                if limit and total_spend > limit:
+                    over_budget_cats.append(cat_name)
+                    
+            if over_budget_cats:
+                insights.append({
+                    "title": f"Budget Breached: {', '.join(over_budget_cats)}",
+                    "content": f"Active transactions have breached monthly allocations for {', '.join(over_budget_cats)}. Review recent expenses to restrict further outflows.",
+                    "type": "warning"
+                })
+            else:
+                insights.append({
+                    "title": "Ledger Budgets Intact",
+                    "content": "All category expenses are currently operating within the monthly limits you defined.",
+                    "type": "success"
+                })
 
         return jsonify({"insights": insights})
     except Exception as e:

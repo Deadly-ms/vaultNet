@@ -105,31 +105,3 @@ ALTER TABLE price_history SET (
   timescaledb.compress_segmentby = 'symbol'
 );
 SELECT add_compression_policy('price_history', INTERVAL '7 days', if_not_exists => TRUE);
-
--- Seed Initial Data
-INSERT INTO accounts (name, type, current_balance, currency) VALUES
-('HDFC Savings Bank', 'bank', 125000.00, 'INR'),
-('Zerodha Demat Account', 'broker', 450000.00, 'INR'),
-('SBI Credit Card', 'credit_card', -15000.00, 'INR'),
-('Cash Wallet', 'wallet', 3000.00, 'INR')
-ON CONFLICT DO NOTHING;
-
-INSERT INTO budgets (category, monthly_limit) VALUES
-('Food', 15000.00),
-('Rent', 30000.00),
-('Utilities', 8000.00),
-('Entertainment', 10000.00),
-('Investment', 50000.00),
-('Shopping', 12000.00),
-('Uncategorized', 50000.00)
-ON CONFLICT (category) DO NOTHING;
-
--- Seed some transactions for display validation
-INSERT INTO transactions (account_id, date, amount, type, category, description, source) VALUES
-(1, CURRENT_DATE - INTERVAL '10 days', 5000.00, 'debit', 'Utilities', 'Electricity Bill Payment', 'manual'),
-(1, CURRENT_DATE - INTERVAL '8 days', 1200.00, 'debit', 'Food', 'Dinner at Restaurant', 'manual'),
-(1, CURRENT_DATE - INTERVAL '5 days', 2500.00, 'debit', 'Shopping', 'New apparel online', 'manual'),
-(3, CURRENT_DATE - INTERVAL '4 days', 850.00, 'debit', 'Food', 'Groceries delivery', 'manual'),
-(1, CURRENT_DATE - INTERVAL '2 days', 95000.00, 'credit', 'Salary', 'Monthly salary credit', 'manual'),
-(2, CURRENT_DATE - INTERVAL '1 day', 25000.00, 'debit', 'Investment', 'SIP Mutual Fund purchase', 'manual')
-ON CONFLICT DO NOTHING;
