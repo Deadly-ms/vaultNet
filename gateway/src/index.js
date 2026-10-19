@@ -61,7 +61,11 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal Server Error', details: err.message });
 });
 
+const { initDb } = require('./migrate');
+
 // Start Express Server
 app.listen(PORT, () => {
   console.log(`API Gateway is running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode.`);
+  // Run idempotent migrations to guarantee tables exist
+  initDb();
 });

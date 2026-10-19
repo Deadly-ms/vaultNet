@@ -7,8 +7,10 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Gateway URL - matches the Node.js Express Gateway port mapped on localhost
-  const API_BASE = 'http://localhost:5001/api';
+  // Gateway URL - dynamic via Vite env variable with fallback to local development
+  const rawApiBase = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+  const cleanBase = rawApiBase.replace(/\/+$/, '');
+  const API_BASE = cleanBase.endsWith('/api') ? cleanBase : `${cleanBase}/api`;
 
   useEffect(() => {
     const verifySessionToken = async () => {

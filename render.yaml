@@ -1,0 +1,46 @@
+services:
+  # 1. API Gateway (Node.js + Express)
+  - type: web
+    name: vaultnet-gateway
+    runtime: node
+    rootDir: gateway
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MASTER_PIN
+        value: "1234"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vaultnet-db
+          property: connectionString
+      - key: QUANT_ENGINE_URL
+        fromService:
+          type: web
+          name: vaultnet-quant-engine
+          property: host
+
+  # 2. Quant & AI Engine (Python + Flask + Gunicorn)
+  - type: web
+    name: vaultnet-quant-engine
+    runtime: python
+    rootDir: quant-engine
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+
+databases:
+  # 3. PostgreSQL Database
+  - name: vaultnet-db
+    plan: free
+    databaseName: fintech
+    user: postgres

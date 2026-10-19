@@ -12,27 +12,49 @@ if (result.error || !process.env.DATABASE_URL) {
 
 console.log('Resolved Database URL:', process.env.DATABASE_URL ? 'LOADED successfully' : 'NOT FOUND (Defaulting to localhost)');
 
-const dbUrl = new URL(process.env.DATABASE_URL);
-const endpointId = dbUrl.hostname.split('.')[0];
-const pool = new Pool({
-  user: dbUrl.username,
-  password: decodeURIComponent(dbUrl.password),
-  host: dbUrl.hostname.includes('neon.tech') ? '50.16.189.237' : dbUrl.hostname,
-  port: dbUrl.port || 5432,
-  database: dbUrl.pathname.slice(1),
-  ssl: dbUrl.hostname.includes('neon.tech') ? {
-    rejectUnauthorized: false
-  } : false,
-  options: dbUrl.hostname.includes('neon.tech') ? `endpoint=${endpointId}` : undefined
-});
+const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/fintech';
+const isProduction = process.env.NODE_ENV === 'production';
+
+let poolConfig = {};
+
+try {
+  const dbUrl = new URL(connectionString);
+  const isLocal = dbUrl.hostname === 'localhost' || dbUrl.hostname === '127.0.0.1' || dbUrl.hostname === 'db';
+  const isNeon = dbUrl.hostname.includes('neon.tech');
+  const requiresSsl = !isLocal || isProduction || dbUrl.searchParams.get('sslmode') === 'require';
+
+  if (isNeon) {
+    const endpointId = dbUrl.hostname.split('.')[0];
+    poolConfig = {
+      user: dbUrl.username,
+      password: decodeURIComponent(dbUrl.password),
+      host: '50.16.189.237',
+      port: dbUrl.port || 5432,
+      database: dbUrl.pathname.slice(1),
+      ssl: { rejectUnauthorized: false },
+      options: `endpoint=${endpointId}`
+    };
+  } else {
+    poolConfig = {
+      connectionString,
+      ssl: requiresSsl ? { rejectUnauthorized: false } : false
+    };
+  }
+} catch (e) {
+  poolConfig = {
+    connectionString,
+    ssl: isProduction ? { rejectUnauthorized: false } : false
+  };
+}
+
+const pool = new Pool(poolConfig);
 
 pool.on('connect', () => {
-  console.log('Connected to PostgreSQL/TimescaleDB successfully.');
+  console.log('Connected to PostgreSQL database successfully.');
 });
 
 pool.on('error', (err) => {
-  console.error('Unexpected error on idle PostgreSQL client:', err);
-  process.exit(-1);
+  console.error('PostgreSQL client error (idle):', err.message);
 });
 
 module.exports = {
