@@ -1339,339 +1339,363 @@ def generate_mock_history(symbol, start, end):
 
 @app.route('/quant/compare', methods=['POST'])
 def compare_assets():
-    data = request.json or {}
-    symbols = data.get('symbols', [])
-    mode = data.get('mode', 'sip').lower()
-    frequency = data.get('frequency', 'monthly').lower()
-    amount = float(data.get('amount', 5000.0))
-    start_date = data.get('start_date')
-    end_date = data.get('end_date')
-    prediction_years = int(data.get('prediction_years', 3))
-    risk_free_rate = 0.06
+    try:
+        data = request.json or {}
+        symbols = data.get('symbols', [])
+        mode = data.get('mode', 'sip').lower()
+        frequency = data.get('frequency', 'monthly').lower()
+        amount = float(data.get('amount', 5000.0))
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        prediction_years = int(data.get('prediction_years', 3))
+        risk_free_rate = 0.06
 
-    if not symbols:
-        return jsonify({"error": "Symbols list is required."}), 400
+        if not symbols:
+            return jsonify({"error": "Symbols list is required."}), 400
 
-    import datetime
-    import pandas as pd
-    import numpy as np
-    
-    today = datetime.date.today()
-    if not end_date:
-        end_date = today.strftime("%Y-%m-%d")
-    if not start_date:
-        start_date = (today - datetime.timedelta(days=3*365)).strftime("%Y-%m-%d")
+        import datetime
+        import pandas as pd
+        import numpy as np
+        
+        today = datetime.date.today()
+        if not end_date:
+            end_date = today.strftime("%Y-%m-%d")
+        if not start_date:
+            start_date = (today - datetime.timedelta(days=3*365)).strftime("%Y-%m-%d")
 
-    historical_data = {}
-    metrics = {}
-    individual_predictions = {}
-    stock_growth_series = {}
-
-    for symbol in symbols:
-        symbol = symbol.strip().upper()
-        name = symbol
-        try:
-            ticker = yf.Ticker(symbol)
-            df = ticker.history(start=start_date, end=end_date, interval="1d")
-            if df.empty or len(df) < 10:
-                print(f"yfinance returned empty data for {symbol}. Generating mock history...")
-                df = generate_mock_history(symbol, start_date, end_date)
-            else:
-                df = df.sort_index()
-                
-            try:
-                name = ticker.info.get('longName') or ticker.info.get('shortName') or symbol
-            except Exception:
-                mock_db_names = {
-                    "AAPL": "Apple Inc.", "MSFT": "Microsoft Corporation", 
-                    "GOOGL": "Alphabet Inc.", "TSLA": "Tesla, Inc.",
-                    "AMZN": "Amazon.com, Inc.", "RELIANCE.NS": "Reliance Industries Limited",
-                    "TCS.NS": "Tata Consultancy Services Limited", "INFY.NS": "Infosys Limited",
-                    "HDFCBANK.NS": "HDFC Bank Limited"
-                }
-                name = mock_db_names.get(symbol, f"{symbol} Equity")
-        except Exception as e:
-            print(f"Error loading {symbol} from yfinance: {e}. Generating mock history...")
-            df = generate_mock_history(symbol, start_date, end_date)
-            
-        historical_data[symbol] = (df, name)
-
-    # Perform growth simulation for each asset
-    for symbol, (df, name) in historical_data.items():
-        df = df.copy()
-        
-        # Identify purchase dates based on frequency
-        purchase_dates = []
-        if mode == 'lumpsum':
-            purchase_dates = [df.index[0].date()]
-        else: # sip
-            df_dates = df.index.to_series()
-            if frequency == 'weekly':
-                year_week = df_dates.dt.strftime('%G-%V')
-                purchase_indices = df.groupby(year_week).apply(lambda x: x.index[0])
-                purchase_dates = [i.date() for i in purchase_indices]
-            else: # monthly
-                year_month = df_dates.dt.strftime('%Y-%m')
-                purchase_indices = df.groupby(year_month).apply(lambda x: x.index[0])
-                purchase_dates = [i.date() for i in purchase_indices]
-
-        purchase_set = set(purchase_dates)
-        
-        total_invested = 0.0
-        shares_owned = 0.0
-        cash_flows = []
-        
-        df['Total_Invested'] = 0.0
-        df['Shares_Owned'] = 0.0
-        df['Portfolio_Value'] = 0.0
-        
-        current_shares = 0.0
-        
-        for date_idx, row in df.iterrows():
-            curr_date = date_idx.date()
-            close_p = float(row['Close'])
-            
-            if curr_date in purchase_set:
-                if mode == 'lumpsum' and total_invested > 0:
-                    pass
-                else:
-                    total_invested += amount
-                    current_shares += amount / close_p
-                    cash_flows.append((curr_date, -amount))
-                    
-            df.at[date_idx, 'Total_Invested'] = total_invested
-            df.at[date_idx, 'Shares_Owned'] = current_shares
-            df.at[date_idx, 'Portfolio_Value'] = current_shares * close_p
-
-        final_row = df.iloc[-1]
-        final_val = float(final_row['Portfolio_Value'])
-        final_invested = float(final_row['Total_Invested'])
-        
-        # Cash flow final value
-        cash_flows.append((df.index[-1].date(), final_val))
-        
-        irr_val = xirr(cash_flows)
-        abs_return = ((final_val - final_invested) / final_invested * 100) if final_invested > 0 else 0.0
-        
-        # Volatility
-        stock_daily_returns = df['Close'].pct_change().dropna()
-        daily_vol = stock_daily_returns.std()
-        ann_vol = float(daily_vol * np.sqrt(252) * 100) if not pd.isna(daily_vol) else 20.0
-        
-        # Max Drawdown
-        peak = df['Portfolio_Value'].cummax()
-        drawdown = (df['Portfolio_Value'] - peak) / peak
-        max_dd = float(drawdown.min() * 100) if not pd.isna(drawdown.min()) else 0.0
-        
-        # Sharpe
-        sharpe_val = ((irr_val / 100) - risk_free_rate) / (ann_vol / 100) if ann_vol > 0 else 0.0
-
-        # Resample growth history to Monthly
-        resampled_df = df.resample('ME').last()
-        growth_history = []
-        for d_t, r_row in resampled_df.iterrows():
-            if pd.isna(r_row['Portfolio_Value']):
-                continue
-            growth_history.append({
-                "date": d_t.strftime("%Y-%m-%d"),
-                "invested": float(round(r_row['Total_Invested'], 2)),
-                "value": float(round(r_row['Portfolio_Value'], 2))
-            })
-            
-        last_date_str = df.index[-1].strftime("%Y-%m-%d")
-        if not growth_history or growth_history[-1]["date"] != last_date_str:
-            growth_history.append({
-                "date": last_date_str,
-                "invested": float(round(final_invested, 2)),
-                "value": float(round(final_val, 2))
-            })
-            
-        stock_growth_series[symbol] = growth_history
-
-        # ----------------------------------------------------
-        # Monte Carlo Future Projection Simulation
-        # ----------------------------------------------------
-        log_returns = np.log(df['Close'] / df['Close'].shift(1)).dropna()
-        if not log_returns.empty:
-            mu_daily = log_returns.mean()
-            var_daily = log_returns.var()
-            drift_daily = mu_daily + 0.5 * var_daily
-            vol_daily = log_returns.std()
-            
-            drift_ann = drift_daily * 252
-            vol_ann = vol_daily * np.sqrt(252)
-        else:
-            drift_ann = 0.12
-            vol_ann = 0.20
-            
-        # Limits check
-        drift_ann = np.clip(drift_ann, -0.15, 0.35)
-        vol_ann = np.clip(vol_ann, 0.08, 0.45)
-        
-        n_paths = 150
-        n_months = prediction_years * 12
-        dt = 1.0 / 12.0
-        
-        sim_prices = np.zeros((n_months + 1, n_paths))
-        sim_prices[0, :] = float(df['Close'].iloc[-1])
-        
-        sim_portfolio_values = np.zeros((n_months + 1, n_paths))
-        sim_portfolio_values[0, :] = final_val
-        
-        sim_shares = np.zeros(n_paths)
-        sim_shares[:] = current_shares
-        
-        invested_path = np.zeros(n_months + 1)
-        invested_path[0] = final_invested
-        
-        np.random.seed(sum(ord(c) for c in symbol) % 1000)
-        
-        for m in range(1, n_months + 1):
-            shocks = np.random.normal(0, 1, n_paths)
-            drift_term = (drift_ann - 0.5 * (vol_ann ** 2)) * dt
-            diffusion_term = vol_ann * shocks * np.sqrt(dt)
-            sim_prices[m, :] = sim_prices[m - 1, :] * np.exp(drift_term + diffusion_term)
-            
-            if mode == 'sip':
-                invested_path[m] = invested_path[m - 1] + amount
-                for p in range(n_paths):
-                    sim_shares[p] += amount / sim_prices[m, p]
-                    sim_portfolio_values[m, p] = sim_shares[p] * sim_prices[m, p]
-            else: # lumpsum
-                invested_path[m] = invested_path[m - 1]
-                for p in range(n_paths):
-                    sim_portfolio_values[m, p] = sim_shares[p] * sim_prices[m, p]
-
-        p10_path = np.percentile(sim_portfolio_values, 10, axis=1)
-        p50_path = np.percentile(sim_portfolio_values, 50, axis=1)
-        p90_path = np.percentile(sim_portfolio_values, 90, axis=1)
-        
-        last_date = df.index[-1]
-        future_dates = []
-        for m in range(n_months + 1):
-            future_date = last_date + pd.DateOffset(months=m)
-            future_dates.append(future_date.strftime("%Y-%m-%d"))
-            
-        prediction_history = []
-        for m in range(n_months + 1):
-            prediction_history.append({
-                "date": future_dates[m],
-                "invested": float(round(invested_path[m], 2)),
-                "p10": float(round(p10_path[m], 2)),
-                "p50": float(round(p50_path[m], 2)),
-                "p90": float(round(p90_path[m], 2))
-            })
-            
-        individual_predictions[symbol] = prediction_history
-
-        metrics[symbol] = {
-            "name": name,
-            "total_invested": float(round(final_invested, 2)),
-            "final_value": float(round(final_val, 2)),
-            "total_gain": float(round(final_val - final_invested, 2)),
-            "absolute_return": float(round(abs_return, 2)),
-            "irr": float(round(irr_val, 2)),
-            "volatility": float(round(ann_vol, 2)),
-            "sharpe": float(round(sharpe_val, 2)),
-            "max_drawdown": float(round(max_dd, 2)),
-            "expected_future_value": float(round(p50_path[-1], 2)),
-            "pessimistic_future_value": float(round(p10_path[-1], 2)),
-            "optimistic_future_value": float(round(p90_path[-1], 2)),
-            "projected_gain_pct": float(round(((p50_path[-1] - invested_path[-1]) / invested_path[-1] * 100), 2)) if invested_path[-1] > 0 else 0.0
+        mock_db_names = {
+            "AAPL": "Apple Inc.", "MSFT": "Microsoft Corporation", 
+            "GOOGL": "Alphabet Inc.", "TSLA": "Tesla, Inc.",
+            "AMZN": "Amazon.com, Inc.", "NVDA": "NVIDIA Corporation",
+            "META": "Meta Platforms, Inc.",
+            "RELIANCE.NS": "Reliance Industries Limited",
+            "TCS.NS": "Tata Consultancy Services Limited", 
+            "INFY.NS": "Infosys Limited",
+            "HDFCBANK.NS": "HDFC Bank Limited",
+            "ICICIBANK.NS": "ICICI Bank Limited",
+            "WIPRO.NS": "Wipro Limited"
         }
 
-    # Merge growth series for unified historical chart data
-    all_dates = sorted(list(set(pt["date"] for sym in stock_growth_series for pt in stock_growth_series[sym])))
-    historical_charts = []
-    for dt in all_dates:
-        chart_point = {"date": dt}
-        invested_amt = 0.0
-        for sym in stock_growth_series:
-            matching_pt = next((pt for pt in stock_growth_series[sym] if pt["date"] == dt), None)
-            if matching_pt:
-                chart_point[sym] = matching_pt["value"]
-                invested_amt = matching_pt["invested"]
-        chart_point["invested"] = invested_amt
-        historical_charts.append(chart_point)
+        historical_data = {}
+        metrics = {}
+        individual_predictions = {}
+        stock_growth_series = {}
 
-    # Merge expected P50 trajectories of all stocks for predictions
-    pred_dates = sorted(list(set(pt["date"] for sym in individual_predictions for pt in individual_predictions[sym])))
-    prediction_charts = []
-    for dt in pred_dates:
-        chart_point = {"date": dt}
-        invested_amt = 0.0
-        for sym in individual_predictions:
-            matching_pt = next((pt for pt in individual_predictions[sym] if pt["date"] == dt), None)
-            if matching_pt:
-                chart_point[f"{sym}_p50"] = matching_pt["p50"]
-                invested_amt = matching_pt["invested"]
-        chart_point["invested"] = invested_amt
-        prediction_charts.append(chart_point)
-
-    ai_critique = ""
-    if api_key_configured:
-        try:
-            metrics_summary = {sym: {
-                "name": metrics[sym]["name"],
-                "total_invested": metrics[sym]["total_invested"],
-                "final_value": metrics[sym]["final_value"],
-                "absolute_return": metrics[sym]["absolute_return"],
-                "annualized_irr": metrics[sym]["irr"],
-                "volatility": metrics[sym]["volatility"],
-                "sharpe": metrics[sym]["sharpe"],
-                "max_drawdown": metrics[sym]["max_drawdown"]
-            } for sym in metrics}
+        for raw_symbol in symbols:
+            symbol = raw_symbol.strip().upper()
+            name = mock_db_names.get(symbol, f"{symbol} Equity")
+            df = pd.DataFrame()
             
-            predictions_summary = {sym: {
-                "expected_future_value": metrics[sym]["expected_future_value"],
-                "pessimistic_future_value": metrics[sym]["pessimistic_future_value"],
-                "optimistic_future_value": metrics[sym]["optimistic_future_value"],
-                "projected_gain_pct": metrics[sym]["projected_gain_pct"]
-            } for sym in metrics}
+            try:
+                ticker = yf.Ticker(symbol)
+                df = ticker.history(start=start_date, end=end_date, interval="1d")
+                if df.empty or len(df) < 10:
+                    print(f"yfinance returned empty data for {symbol}. Generating mock history...")
+                    df = generate_mock_history(symbol, start_date, end_date)
+                else:
+                    df = df.sort_index()
+                    df['Close'] = df['Close'].ffill().bfill()
+            except Exception as e:
+                print(f"Error loading {symbol} from yfinance: {e}. Generating mock history...")
+                df = generate_mock_history(symbol, start_date, end_date)
+                
+            historical_data[symbol] = (df, name)
 
-            prompt = f"""
-            You are VaultNet Wealth Coach, an unhedged personal quant and investment strategist.
-            Analyze and critique this stock comparison for a long-term {mode} ({frequency if mode == 'sip' else 'lumpsum'}) investment of {amount:,.2f} from {start_date} to {end_date}.
+        # Perform growth simulation for each asset
+        for symbol, (df, name) in historical_data.items():
+            df = df.copy()
             
-            Stock Metrics:
-            {json.dumps(metrics_summary, indent=2)}
+            # Robust, fail-safe purchase dates resolution
+            purchase_dates = []
+            if mode == 'lumpsum':
+                purchase_dates = [df.index[0].date()]
+            else: # sip
+                seen_periods = set()
+                for ts in df.index:
+                    period_key = ts.strftime('%Y-%W' if frequency == 'weekly' else '%Y-%m')
+                    if period_key not in seen_periods:
+                        seen_periods.add(period_key)
+                        purchase_dates.append(ts.date())
+
+            purchase_set = set(purchase_dates)
             
-            Future Prediction (Expected median vs pessimistic vs optimistic in {prediction_years} years):
-            {json.dumps(predictions_summary, indent=2)}
+            total_invested = 0.0
+            shares_owned = 0.0
+            cash_flows = []
             
-            Write an opinionated, unhedged 2-paragraph critique of these options. Highlight the risk-reward profiles (Sharpe vs Volatility) and which asset is more suitable for consistent wealth compounding. Suggest a clear path forward.
-            Do NOT include advisor warnings, disclosures, or boilerplate phrases. Be direct.
-            """
+            df['Total_Invested'] = 0.0
+            df['Shares_Owned'] = 0.0
+            df['Portfolio_Value'] = 0.0
+            
+            current_shares = 0.0
+            
+            for date_idx, row in df.iterrows():
+                curr_date = date_idx.date()
+                close_p = float(row['Close'])
+                if close_p <= 0.001 or np.isnan(close_p):
+                    close_p = 1.0
+                
+                if curr_date in purchase_set:
+                    if mode == 'lumpsum' and total_invested > 0:
+                        pass
+                    else:
+                        total_invested += amount
+                        current_shares += amount / close_p
+                        cash_flows.append((curr_date, -amount))
+                        
+                df.at[date_idx, 'Total_Invested'] = total_invested
+                df.at[date_idx, 'Shares_Owned'] = current_shares
+                df.at[date_idx, 'Portfolio_Value'] = current_shares * close_p
 
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content(prompt)
-            ai_critique = response.text.strip()
-        except Exception as e:
-            print(f"Gemini comparison critique failed, falling back: {e}")
+            final_row = df.iloc[-1]
+            final_val = float(final_row['Portfolio_Value'])
+            final_invested = float(final_row['Total_Invested'])
+            
+            # Cash flow final value
+            cash_flows.append((df.index[-1].date(), final_val))
+            
+            irr_val = xirr(cash_flows)
+            abs_return = ((final_val - final_invested) / final_invested * 100) if final_invested > 0 else 0.0
+            
+            if np.isnan(irr_val) or np.isinf(irr_val):
+                irr_val = abs_return
 
-    if not ai_critique:
-        best_cagr_sym = max(metrics.keys(), key=lambda s: metrics[s]["irr"])
-        best_sharpe_sym = max(metrics.keys(), key=lambda s: metrics[s]["sharpe"])
-        lowest_vol_sym = min(metrics.keys(), key=lambda s: metrics[s]["volatility"])
-        
-        p1 = f"Historical analysis indicates that {metrics[best_cagr_sym]['name']} ({best_cagr_sym}) was the top-performing vehicle in this cohort, delivering a money-weighted annualized return (IRR) of {metrics[best_cagr_sym]['irr']}%. From a risk-adjusted perspective, {metrics[best_sharpe_sym]['name']} ({best_sharpe_sym}) leads the group with a Sharpe ratio of {metrics[best_sharpe_sym]['sharpe']}, reflecting the most efficient return-generation per unit of risk. For capital preservation, {metrics[lowest_vol_sym]['name']} ({lowest_vol_sym}) showed the lowest volatility ({metrics[lowest_vol_sym]['volatility']}%), offering a smoother journey but with lower compounding speed."
-        p2 = f"Under the Monte Carlo projection for the next {prediction_years} years, the expected final values indicate that {best_cagr_sym} is likely to remain the momentum leader, reaching an expected portfolio value of {metrics[best_cagr_sym]['expected_future_value']:,.2f}. However, in a market downturn (10th percentile outcome), {lowest_vol_sym} presents a more robust floor. For long-term automated {mode.upper()} strategies, we recommend allocating a core position to {best_sharpe_sym} due to its superior risk efficiency, supplemented by {best_cagr_sym} for growth velocity."
-        ai_critique = f"{p1}\n\n{p2}"
+            # Volatility
+            stock_daily_returns = df['Close'].pct_change().dropna()
+            daily_vol = stock_daily_returns.std()
+            ann_vol = float(daily_vol * np.sqrt(252) * 100) if not pd.isna(daily_vol) else 20.0
+            if np.isnan(ann_vol) or np.isinf(ann_vol) or ann_vol <= 0:
+                ann_vol = 20.0
+            
+            # Max Drawdown
+            peak = df['Portfolio_Value'].cummax()
+            drawdown = (df['Portfolio_Value'] - peak) / peak
+            max_dd = float(drawdown.min() * 100) if not pd.isna(drawdown.min()) else 0.0
+            if np.isnan(max_dd) or np.isinf(max_dd):
+                max_dd = 0.0
+            
+            # Sharpe
+            sharpe_val = ((irr_val / 100) - risk_free_rate) / (ann_vol / 100) if ann_vol > 0 else 0.0
+            if np.isnan(sharpe_val) or np.isinf(sharpe_val):
+                sharpe_val = 0.0
 
-    return jsonify({
-        "mode": mode,
-        "frequency": frequency,
-        "amount": amount,
-        "start_date": start_date,
-        "end_date": end_date,
-        "prediction_years": prediction_years,
-        "symbols": list(metrics.keys()),
-        "metrics": metrics,
-        "historical_charts": historical_charts,
-        "prediction_charts": prediction_charts,
-        "individual_predictions": individual_predictions,
-        "ai_critique": ai_critique
-    })
+            # Resample growth history to Monthly (compatible with pandas 2.0-2.2+)
+            try:
+                resampled_df = df.resample('ME').last()
+            except Exception:
+                resampled_df = df.resample('M').last()
+
+            growth_history = []
+            for d_t, r_row in resampled_df.iterrows():
+                val = r_row['Portfolio_Value']
+                if pd.isna(val):
+                    continue
+                growth_history.append({
+                    "date": d_t.strftime("%Y-%m-%d"),
+                    "invested": float(round(r_row['Total_Invested'], 2)),
+                    "value": float(round(val, 2))
+                })
+                
+            last_date_str = df.index[-1].strftime("%Y-%m-%d")
+            if not growth_history or growth_history[-1]["date"] != last_date_str:
+                growth_history.append({
+                    "date": last_date_str,
+                    "invested": float(round(final_invested, 2)),
+                    "value": float(round(final_val, 2))
+                })
+                
+            stock_growth_series[symbol] = growth_history
+
+            # ----------------------------------------------------
+            # Monte Carlo Future Projection Simulation
+            # ----------------------------------------------------
+            log_returns = np.log(df['Close'] / df['Close'].shift(1)).dropna()
+            if not log_returns.empty:
+                mu_daily = float(log_returns.mean())
+                var_daily = float(log_returns.var())
+                drift_daily = mu_daily + 0.5 * var_daily
+                vol_daily = float(log_returns.std())
+                
+                drift_ann = drift_daily * 252
+                vol_ann = vol_daily * np.sqrt(252)
+            else:
+                drift_ann = 0.12
+                vol_ann = 0.20
+                
+            # Limits check
+            drift_ann = float(np.clip(drift_ann, -0.15, 0.35))
+            vol_ann = float(np.clip(vol_ann, 0.08, 0.45))
+            
+            n_paths = 150
+            n_months = prediction_years * 12
+            dt = 1.0 / 12.0
+            
+            sim_prices = np.zeros((n_months + 1, n_paths))
+            sim_prices[0, :] = float(df['Close'].iloc[-1])
+            
+            sim_portfolio_values = np.zeros((n_months + 1, n_paths))
+            sim_portfolio_values[0, :] = final_val
+            
+            sim_shares = np.zeros(n_paths)
+            sim_shares[:] = current_shares
+            
+            invested_path = np.zeros(n_months + 1)
+            invested_path[0] = final_invested
+            
+            np.random.seed(sum(ord(c) for c in symbol) % 1000)
+            
+            for m in range(1, n_months + 1):
+                shocks = np.random.normal(0, 1, n_paths)
+                drift_term = (drift_ann - 0.5 * (vol_ann ** 2)) * dt
+                diffusion_term = vol_ann * shocks * np.sqrt(dt)
+                sim_prices[m, :] = np.clip(sim_prices[m - 1, :] * np.exp(drift_term + diffusion_term), 0.01, None)
+                
+                if mode == 'sip':
+                    invested_path[m] = invested_path[m - 1] + amount
+                    for p in range(n_paths):
+                        sim_shares[p] += amount / sim_prices[m, p]
+                        sim_portfolio_values[m, p] = sim_shares[p] * sim_prices[m, p]
+                else: # lumpsum
+                    invested_path[m] = invested_path[m - 1]
+                    for p in range(n_paths):
+                        sim_portfolio_values[m, p] = sim_shares[p] * sim_prices[m, p]
+
+            p10_path = np.percentile(sim_portfolio_values, 10, axis=1)
+            p50_path = np.percentile(sim_portfolio_values, 50, axis=1)
+            p90_path = np.percentile(sim_portfolio_values, 90, axis=1)
+            
+            last_date = df.index[-1]
+            future_dates = []
+            for m in range(n_months + 1):
+                future_date = last_date + pd.DateOffset(months=m)
+                future_dates.append(future_date.strftime("%Y-%m-%d"))
+                
+            prediction_history = []
+            for m in range(n_months + 1):
+                prediction_history.append({
+                    "date": future_dates[m],
+                    "invested": float(round(float(invested_path[m]), 2)),
+                    "p10": float(round(float(p10_path[m]), 2)),
+                    "p50": float(round(float(p50_path[m]), 2)),
+                    "p90": float(round(float(p90_path[m]), 2))
+                })
+                
+            individual_predictions[symbol] = prediction_history
+
+            metrics[symbol] = {
+                "name": name,
+                "total_invested": float(round(final_invested, 2)),
+                "final_value": float(round(final_val, 2)),
+                "total_gain": float(round(final_val - final_invested, 2)),
+                "absolute_return": float(round(abs_return, 2)),
+                "irr": float(round(irr_val, 2)),
+                "volatility": float(round(ann_vol, 2)),
+                "sharpe": float(round(sharpe_val, 2)),
+                "max_drawdown": float(round(max_dd, 2)),
+                "expected_future_value": float(round(float(p50_path[-1]), 2)),
+                "pessimistic_future_value": float(round(float(p10_path[-1]), 2)),
+                "optimistic_future_value": float(round(float(p90_path[-1]), 2)),
+                "projected_gain_pct": float(round(((float(p50_path[-1]) - float(invested_path[-1])) / float(invested_path[-1]) * 100), 2)) if invested_path[-1] > 0 else 0.0
+            }
+
+        # Merge growth series for unified historical chart data
+        all_dates = sorted(list(set(pt["date"] for sym in stock_growth_series for pt in stock_growth_series[sym])))
+        historical_charts = []
+        for dt in all_dates:
+            chart_point = {"date": dt}
+            invested_amt = 0.0
+            for sym in stock_growth_series:
+                matching_pt = next((pt for pt in stock_growth_series[sym] if pt["date"] == dt), None)
+                if matching_pt:
+                    chart_point[sym] = matching_pt["value"]
+                    invested_amt = matching_pt["invested"]
+            chart_point["invested"] = invested_amt
+            historical_charts.append(chart_point)
+
+        # Merge expected P50 trajectories of all stocks for predictions
+        pred_dates = sorted(list(set(pt["date"] for sym in individual_predictions for pt in individual_predictions[sym])))
+        prediction_charts = []
+        for dt in pred_dates:
+            chart_point = {"date": dt}
+            invested_amt = 0.0
+            for sym in individual_predictions:
+                matching_pt = next((pt for pt in individual_predictions[sym] if pt["date"] == dt), None)
+                if matching_pt:
+                    chart_point[f"{sym}_p50"] = matching_pt["p50"]
+                    invested_amt = matching_pt["invested"]
+            chart_point["invested"] = invested_amt
+            prediction_charts.append(chart_point)
+
+        ai_critique = ""
+        if api_key_configured:
+            try:
+                metrics_summary = {sym: {
+                    "name": metrics[sym]["name"],
+                    "total_invested": metrics[sym]["total_invested"],
+                    "final_value": metrics[sym]["final_value"],
+                    "absolute_return": metrics[sym]["absolute_return"],
+                    "annualized_irr": metrics[sym]["irr"],
+                    "volatility": metrics[sym]["volatility"],
+                    "sharpe": metrics[sym]["sharpe"],
+                    "max_drawdown": metrics[sym]["max_drawdown"]
+                } for sym in metrics}
+                
+                predictions_summary = {sym: {
+                    "expected_future_value": metrics[sym]["expected_future_value"],
+                    "pessimistic_future_value": metrics[sym]["pessimistic_future_value"],
+                    "optimistic_future_value": metrics[sym]["optimistic_future_value"],
+                    "projected_gain_pct": metrics[sym]["projected_gain_pct"]
+                } for sym in metrics}
+
+                prompt = f"""
+                You are VaultNet Wealth Coach, an unhedged personal quant and investment strategist.
+                Analyze and critique this stock comparison for a long-term {mode} ({frequency if mode == 'sip' else 'lumpsum'}) investment of {amount:,.2f} from {start_date} to {end_date}.
+                
+                Stock Metrics:
+                {json.dumps(metrics_summary, indent=2)}
+                
+                Future Prediction (Expected median vs pessimistic vs optimistic in {prediction_years} years):
+                {json.dumps(predictions_summary, indent=2)}
+                
+                Write an opinionated, unhedged 2-paragraph critique of these options. Highlight the risk-reward profiles (Sharpe vs Volatility) and which asset is more suitable for consistent wealth compounding. Suggest a clear path forward.
+                Do NOT include advisor warnings, disclosures, or boilerplate phrases. Be direct.
+                """
+
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                response = model.generate_content(prompt)
+                ai_critique = response.text.strip()
+            except Exception as e:
+                print(f"Gemini comparison critique failed, falling back: {e}")
+
+        if not ai_critique:
+            best_cagr_sym = max(metrics.keys(), key=lambda s: metrics[s]["irr"])
+            best_sharpe_sym = max(metrics.keys(), key=lambda s: metrics[s]["sharpe"])
+            lowest_vol_sym = min(metrics.keys(), key=lambda s: metrics[s]["volatility"])
+            
+            p1 = f"Historical analysis indicates that {metrics[best_cagr_sym]['name']} ({best_cagr_sym}) was the top-performing vehicle in this cohort, delivering a money-weighted annualized return (IRR) of {metrics[best_cagr_sym]['irr']}%. From a risk-adjusted perspective, {metrics[best_sharpe_sym]['name']} ({best_sharpe_sym}) leads the group with a Sharpe ratio of {metrics[best_sharpe_sym]['sharpe']}, reflecting the most efficient return-generation per unit of risk. For capital preservation, {metrics[lowest_vol_sym]['name']} ({lowest_vol_sym}) showed the lowest volatility ({metrics[lowest_vol_sym]['volatility']}%), offering a smoother journey but with lower compounding speed."
+            p2 = f"Under the Monte Carlo projection for the next {prediction_years} years, the expected final values indicate that {best_cagr_sym} is likely to remain the momentum leader, reaching an expected portfolio value of {metrics[best_cagr_sym]['expected_future_value']:,.2f}. However, in a market downturn (10th percentile outcome), {lowest_vol_sym} presents a more robust floor. For long-term automated {mode.upper()} strategies, we recommend allocating a core position to {best_sharpe_sym} due to its superior risk efficiency, supplemented by {best_cagr_sym} for growth velocity."
+            ai_critique = f"{p1}\n\n{p2}"
+
+        return jsonify({
+            "mode": mode,
+            "frequency": frequency,
+            "amount": amount,
+            "start_date": start_date,
+            "end_date": end_date,
+            "prediction_years": prediction_years,
+            "symbols": list(metrics.keys()),
+            "metrics": metrics,
+            "historical_charts": historical_charts,
+            "prediction_charts": prediction_charts,
+            "individual_predictions": individual_predictions,
+            "ai_critique": ai_critique
+        })
+    except Exception as e:
+        import traceback
+        err_msg = str(e)
+        print(f"Unhandled error in compare_assets: {err_msg}\n{traceback.format_exc()}")
+        return jsonify({"error": f"Internal computation error: {err_msg}"}), 500
+
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8000))

@@ -206,9 +206,11 @@ router.post('/compare', async (req, res) => {
   } catch (error) {
     console.error(`Error executing stock comparison in gateway (${targetUrl}):`, error.message);
     if (error.response) {
+      const errPayload = error.response.data;
+      const detailMsg = typeof errPayload === 'object' ? (errPayload.error || errPayload.message || JSON.stringify(errPayload)) : String(errPayload || '');
       return res.status(error.response.status).json({
-        error: 'Quant engine stock comparison failed.',
-        details: error.response.data
+        error: `Quant engine stock comparison failed${detailMsg ? ': ' + detailMsg : ''}`,
+        details: errPayload
       });
     }
     res.status(500).json({ error: `API gateway comparison engine routing failed: ${error.message} (Target: ${targetUrl})` });

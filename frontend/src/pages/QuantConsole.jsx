@@ -189,7 +189,8 @@ const QuantConsole = () => {
           setSelectedPredictionStock(data.symbols[0]);
         }
       } else {
-        setCompareError(data.error || 'Failed to fetch comparison data.');
+        const detailStr = data.details ? (typeof data.details === 'object' ? (data.details.error || data.details.message || JSON.stringify(data.details)) : String(data.details)) : '';
+        setCompareError(detailStr && !data.error?.includes(detailStr) ? `${data.error} (${detailStr})` : (data.error || 'Failed to fetch comparison data.'));
       }
     } catch (err) {
       console.error(err);
