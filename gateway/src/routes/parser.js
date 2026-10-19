@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const axios = require('axios');
 const FormData = require('form-data');
+const { getQuantEngineUrl } = require('../config/quantEngine');
 require('dotenv').config();
 
 // Use memory storage for quick in-memory forwarding
@@ -13,7 +14,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     return res.status(400).json({ error: 'No file uploaded.' });
   }
 
-  const quantEngineUrl = process.env.QUANT_ENGINE_URL || 'http://quant-engine:8000';
+  const quantEngineUrl = getQuantEngineUrl();
 
   try {
     const formData = new FormData();

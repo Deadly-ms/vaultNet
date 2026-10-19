@@ -3,8 +3,7 @@ const router = express.Router();
 const axios = require('axios');
 const db = require('../config/db');
 require('dotenv').config();
-
-const quantEngineUrl = process.env.QUANT_ENGINE_URL || 'http://quant-engine:8000';
+const { getQuantEngineUrl } = require('../config/quantEngine');
 
 // GET: Portfolio Risk Report (compiles active holdings and forwards)
 router.get('/risk', async (req, res) => {
@@ -27,7 +26,7 @@ router.get('/risk', async (req, res) => {
     }));
 
     console.log('Sending holdings series to python risk evaluator...');
-    const response = await axios.post(`${quantEngineUrl}/quant/risk`, {
+    const response = await axios.post(`${getQuantEngineUrl()}/quant/risk`, {
       holdings: payload,
       risk_free_rate: 0.06
     });
@@ -35,7 +34,7 @@ router.get('/risk', async (req, res) => {
     res.json(response.data);
   } catch (error) {
     console.error('Error fetching quant risk report:', error.message);
-    res.status(500).json({ error: 'Failed to compile quant portfolio risk parameters.' });
+    res.status(500).json({ error: `Failed to compile quant portfolio risk parameters: ${error.message}` });
   }
 });
 
@@ -53,14 +52,14 @@ router.get('/signals', async (req, res) => {
     }));
 
     console.log('Fetching indicators signals from python quant engine...');
-    const response = await axios.post(`${quantEngineUrl}/quant/signals`, {
+    const response = await axios.post(`${getQuantEngineUrl()}/quant/signals`, {
       watchlist: payload
     });
 
     res.json(response.data);
   } catch (error) {
     console.error('Error fetching quant signals:', error.message);
-    res.status(500).json({ error: 'Failed to resolve technical signals.' });
+    res.status(500).json({ error: `Failed to resolve technical signals: ${error.message}` });
   }
 });
 
@@ -102,7 +101,7 @@ router.post('/backtest', async (req, res) => {
     if (dataCount < 15) {
       console.log(`Cache MISS for price series of ${cleanSymbol}. Seeding TimescaleDB hypertable dynamically...`);
       
-      const downloadRes = await axios.get(`${quantEngineUrl}/quant/download`, {
+      const downloadRes = await axios.get(`${getQuantEngineUrl()}/quant/download`, {
         params: { symbol: cleanSymbol, start: start_date, end: end_date }
       });
 
@@ -151,7 +150,7 @@ router.post('/backtest', async (req, res) => {
 
     // 4. Request backtester calculations from Python
     console.log(`Running backtest for ${cleanSymbol} with ${cleanStrategy} strategy against ${pricesArray.length} prices...`);
-    const backtestRes = await axios.post(`${quantEngineUrl}/quant/run-backtest`, {
+    const backtestRes = await axios.post(`${getQuantEngineUrl()}/quant/run-backtest`, {
       prices: pricesArray,
       strategy: cleanStrategy,
       params: params || {},
@@ -177,7 +176,7 @@ router.post('/backtest', async (req, res) => {
         details: error.response.data
       });
     }
-    res.status(500).json({ error: 'Gateway backtesting engine execution failed.' });
+    res.status(500).json({ error: `Gateway backtesting engine execution failed: ${error.message} (Target: ${getQuantEngineUrl()})` });
   }
 });
 
@@ -189,9 +188,11 @@ router.post('/compare', async (req, res) => {
     return res.status(400).json({ error: 'Symbols array is required and must not be empty.' });
   }
 
+  const targetUrl = getQuantEngineUrl();
+
   try {
-    console.log(`Routing stock comparison request for symbols: ${symbols.join(', ')} to quant engine...`);
-    const response = await axios.post(`${quantEngineUrl}/quant/compare`, {
+    console.log(`Routing stock comparison request for symbols: ${symbols.join(', ')} to quant engine at ${targetUrl}...`);
+    const response = await axios.post(`${targetUrl}/quant/compare`, {
       symbols,
       mode: mode || 'sip',
       frequency: frequency || 'monthly',
@@ -203,14 +204,14 @@ router.post('/compare', async (req, res) => {
 
     res.json(response.data);
   } catch (error) {
-    console.error('Error executing stock comparison in gateway:', error.message);
+    console.error(`Error executing stock comparison in gateway (${targetUrl}):`, error.message);
     if (error.response) {
       return res.status(error.response.status).json({
         error: 'Quant engine stock comparison failed.',
         details: error.response.data
       });
     }
-    res.status(500).json({ error: 'API gateway comparison engine routing failed.' });
+    res.status(500).json({ error: `API gateway comparison engine routing failed: ${error.message} (Target: ${targetUrl})` });
   }
 });
 

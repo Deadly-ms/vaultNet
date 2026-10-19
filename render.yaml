@@ -21,10 +21,7 @@ services:
           name: vaultnet-db
           property: connectionString
       - key: QUANT_ENGINE_URL
-        fromService:
-          type: web
-          name: vaultnet-quant-engine
-          property: hostport
+        sync: false
 
   # 2. Quant & AI Engine (Python + Flask + Gunicorn)
   - type: web

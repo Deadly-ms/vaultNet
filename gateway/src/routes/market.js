@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const redisClient = require('../config/redis');
+const { getQuantEngineUrl } = require('../config/quantEngine');
 require('dotenv').config();
 
 // Get live quote with cache-aside pattern using Redis
@@ -14,7 +15,7 @@ router.get('/price', async (req, res) => {
 
   const assetType = (type || 'stock').toLowerCase();
   const cacheKey = `price:${symbol.toUpperCase().trim()}`;
-  const quantEngineUrl = process.env.QUANT_ENGINE_URL || 'http://quant-engine:8000';
+  const quantEngineUrl = getQuantEngineUrl();
 
   try {
     // 1. Check Cache

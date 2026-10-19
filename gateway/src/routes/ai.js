@@ -3,6 +3,7 @@ const router = express.Router();
 const axios = require('axios');
 const db = require('../config/db');
 const redisClient = require('../config/redis');
+const { getQuantEngineUrl } = require('../config/quantEngine');
 require('dotenv').config();
 
 // Helper to compile DB records into a unified portfolio context object
@@ -71,7 +72,7 @@ router.post('/chat', async (req, res) => {
     return res.status(400).json({ error: 'Prompt is required.' });
   }
 
-  const quantEngineUrl = process.env.QUANT_ENGINE_URL || 'http://quant-engine:8000';
+  const quantEngineUrl = getQuantEngineUrl();
 
   try {
     const portfolioContext = await compilePortfolioContext();
@@ -95,7 +96,7 @@ router.post('/chat', async (req, res) => {
 router.get('/insights', async (req, res) => {
   const { refresh } = req.query;
   const cacheKey = 'ai:insights';
-  const quantEngineUrl = process.env.QUANT_ENGINE_URL || 'http://quant-engine:8000';
+  const quantEngineUrl = getQuantEngineUrl();
 
   try {
     // 1. Check Cache unless forced refresh
@@ -138,7 +139,7 @@ router.get('/news', async (req, res) => {
   }
 
   const cacheKey = `ai:news:${symbol.toUpperCase().trim()}`;
-  const quantEngineUrl = process.env.QUANT_ENGINE_URL || 'http://quant-engine:8000';
+  const quantEngineUrl = getQuantEngineUrl();
 
   try {
     // Check Cache

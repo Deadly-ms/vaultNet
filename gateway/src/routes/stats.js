@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/db');
 const redisClient = require('../config/redis');
 const axios = require('axios');
+const { getQuantEngineUrl } = require('../config/quantEngine');
 require('dotenv').config();
 
 // Helper to resolve live price of a symbol with Redis cache-aside caching
@@ -15,7 +16,7 @@ async function getLivePrice(symbol, type) {
     }
     
     // Cache miss - query quant engine microservice
-    const quantEngineUrl = process.env.QUANT_ENGINE_URL || 'http://quant-engine:8000';
+    const quantEngineUrl = getQuantEngineUrl();
     console.log(`Stats price fetcher cache MISS for ${symbol}. Querying quant-engine...`);
     
     const res = await axios.get(`${quantEngineUrl}/market/quote`, {
