@@ -24,7 +24,7 @@ services:
         fromService:
           type: web
           name: vaultnet-quant-engine
-          property: host
+          property: hostport
 
   # 2. Quant & AI Engine (Python + Flask + Gunicorn)
   - type: web
@@ -39,8 +39,7 @@ services:
         sync: false
 
 databases:
-  # 3. PostgreSQL Database
+  # 3. PostgreSQL Database (Render auto-generates credentials)
   - name: vaultnet-db
     plan: free
     databaseName: fintech
-    user: postgres

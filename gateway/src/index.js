@@ -2,6 +2,15 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
+// Normalize QUANT_ENGINE_URL if hostport or bare hostname was provided
+if (process.env.QUANT_ENGINE_URL) {
+  let qUrl = process.env.QUANT_ENGINE_URL.trim();
+  if (!qUrl.startsWith('http://') && !qUrl.startsWith('https://')) {
+    qUrl = `http://${qUrl}`;
+  }
+  process.env.QUANT_ENGINE_URL = qUrl.replace(/\/+$/, '');
+}
+
 // Initialize DB and Cache connections to verify they start cleanly
 require('./config/db');
 require('./config/redis');
